@@ -1,36 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-Created on Thu Jun 15 10:47:32 2022
-
-Attempt to comply with PEP8 style guide requirements
-(https://peps.python.org/pep-0008/) as stated in pylint documentation
-(https://pylint.pycqa.org/en/latest/user_guide/messages/convention/\
-invalid-name.html)
-
 The python script reads raw detector data from plicore EVX spectral sensor
 evaluation kit. Addtionally the internal temperature sensors on the silicon
 photo detector are enabled to read out.
 The photo-detector exposure time value has to be set to identically for both
 detectors!
-
-script version:	0.12
-hardware:	PLI-003-A01
-firmware:	1.0
-
-script tested on:
-    * Operating System: Windows 10
-    * Spyder version: 5.1.5
-    * Python version: 3.9.12 64-bit
-    * Qt version: 5.9.7
-    * PyQt5 version: 5.9.2
-
-    * Operating System: Linux / Ubuntu 18.04.6 LTS / Kernel 4.15 x86_64
-    * Spyder version: 3.2.6
-    * Python version: 3.6.9 64-bit
-    * Qt 5.15.2
-    * PyQt5 5.15.6
-
-@author: ede
 """
 
 import sys                      # check platform specifics
@@ -179,135 +153,107 @@ def m_read_detector(args) -> arr.array:
     return frame
 
 
+def dvc_open():
+    # find usb device
+    VENDOR_ID = 0x0483
+    PRODUCT_ID = 0xa376
+    DEV = usb.core.find(idVendor=VENDOR_ID, idProduct=PRODUCT_ID)
 
+    if DEV is None:
+        raise ValueError("Device not found")
 
-
-# --- MAIN ---
-
-# find usb device
-VENDOR_ID = 0x0483
-PRODUCT_ID = 0xa376
-DEV = usb.core.find(idVendor=VENDOR_ID, idProduct=PRODUCT_ID)
-
-if DEV is None:
-    raise ValueError("Device not found")
-
-# platform specific code - to re-run script-file
-if sys.platform.startswith('linux'):
-    # reset device - necessary under linux
-    DEV.reset()
-
-    # just in case - detach kernel driver module if loaded
+    # set the active configuration. With no arguments, the first
+    # configuration will be the active one
     try:
-        DEV.detach_kernel_driver(0)
+        DEV.set_configuration()
     except usb.USBError as exc:
-        print("")
-        #print("Cant detach kernel driver. Error : {}".format(exc.strerror))
+        print("Cant set configuration. Error : {}".format(exc.strerror))
 
-# set the active configuration. With no arguments, the first
-# configuration will be the active one
-try:
-    DEV.set_configuration()
-except usb.USBError as exc:
-    print("Cant set configuration. Error : {}".format(exc.strerror))
+    # claim device interface (first interface - only one configured - default)
+    try:
+        usb.util.claim_interface(DEV, 0)
+    except usb.USBError as exc:
+        print("Cant claim interface. Error : {}".format(exc.strerror))
 
-# claim device interface (first interface - only one configured - default)
-try:
-    usb.util.claim_interface(DEV, 0)
-except usb.USBError as exc:
-    print("Cant claim interface. Error : {}".format(exc.strerror))
+    print("USB device acquired, VID={:#06x}, PID={:#06x}".format(VENDOR_ID, PRODUCT_ID))
 
-print("USB device acquired, VID={:#06x}, PID={:#06x}".format(VENDOR_ID, PRODUCT_ID))
+    # get an endpoint instance
+    CFG = DEV.get_active_configuration()
 
-# get an endpoint instance
-CFG = DEV.get_active_configuration()
+    # print endpoint addresses for device configuration
+    for CFG in DEV:
+        for i in CFG:
+            for e in i:
+                EP_DIR = ""
+                if usb.util.endpoint_direction(e.bEndpointAddress) == usb.util.ENDPOINT_IN:
+                    EP_DIR = "IN"
+                if usb.util.endpoint_direction(e.bEndpointAddress) == usb.util.ENDPOINT_OUT:
+                    EP_DIR = "OUT"
+                print("  ENDPOINT: {:#04x} - {}".format(e.bEndpointAddress, EP_DIR))
 
-# print endpoint addresses for device configuration
-for CFG in DEV:
-    for i in CFG:
-        for e in i:
-            EP_DIR = ""
-            if usb.util.endpoint_direction(e.bEndpointAddress) == usb.util.ENDPOINT_IN:
-                EP_DIR = "IN"
-            if usb.util.endpoint_direction(e.bEndpointAddress) == usb.util.ENDPOINT_OUT:
-                EP_DIR = "OUT"
-            print("  ENDPOINT: {:#04x} - {}".format(e.bEndpointAddress, EP_DIR))
+    # get interface from configuration index
+    INTF = CFG[(0, 0)]
 
-# get interface from configuration index
-INTF = CFG[(0, 0)]
+    # get first ENDPOINT_OUT
+    EP_OUT = usb.util.find_descriptor(
+        INTF,
+        # match the first OUT endpoint
+        custom_match = \
+        lambda e: \
+            usb.util.endpoint_direction(e.bEndpointAddress) == \
+            usb.util.ENDPOINT_OUT)
 
-# get first ENDPOINT_OUT
-EP_OUT = usb.util.find_descriptor(
-    INTF,
-    # match the first OUT endpoint
-    custom_match = \
-    lambda e: \
-        usb.util.endpoint_direction(e.bEndpointAddress) == \
-        usb.util.ENDPOINT_OUT)
+    assert EP_OUT is not None
 
-assert EP_OUT is not None
+    # get first ENDPOINT_IN
+    EP_IN = usb.util.find_descriptor(
+        INTF,
+        # match the first OUT endpoint
+        custom_match = lambda e: \
+            usb.util.endpoint_direction(e.bEndpointAddress) == usb.util.ENDPOINT_IN)
 
-# get first ENDPOINT_IN
-EP_IN = usb.util.find_descriptor(
-    INTF,
-    # match the first OUT endpoint
-    custom_match = lambda e: \
-        usb.util.endpoint_direction(e.bEndpointAddress) == usb.util.ENDPOINT_IN)
+    assert EP_IN is not None
 
-assert EP_IN is not None
+    return DEV, EP_OUT, EP_IN
 
 # initialize sequence
-m_i2c_write_register([DEV, EP_OUT, EP_IN, 0x00, 0x06, 0x00])
+# m_i2c_write_register([DEV, EP_OUT, EP_IN, 0x00, 0x06, 0x00])
+#
+# m_i2c_write_register([DEV, EP_OUT, EP_IN, 0x15, 0xd0, 0x4a])
+# m_i2c_write_register([DEV, EP_OUT, EP_IN, 0x15, 0xd1, 0x66])
+# m_i2c_write_register([DEV, EP_OUT, EP_IN, 0x15, 0xd6, 0x03])
+# m_i2c_write_register([DEV, EP_OUT, EP_IN, 0x15, 0x02, 0x99])
+# m_i2c_write_register([DEV, EP_OUT, EP_IN, 0x15, 0x00, 0x1c])
+#
+# m_i2c_write_register([DEV, EP_OUT, EP_IN, 0x14, 0xd0, 0x4a])
+# m_i2c_write_register([DEV, EP_OUT, EP_IN, 0x14, 0xd1, 0x66])
+# m_i2c_write_register([DEV, EP_OUT, EP_IN, 0x14, 0xd6, 0x03])
+# m_i2c_write_register([DEV, EP_OUT, EP_IN, 0x14, 0x02, 0x99])
+# m_i2c_write_register([DEV, EP_OUT, EP_IN, 0x14, 0x00, 0x1c])
+#
+# m_i2c_write_register([DEV, EP_OUT, EP_IN, 0x14, 0xa4, 0x2c])
+# m_i2c_write_register([DEV, EP_OUT, EP_IN, 0x15, 0xa4, 0x2c])
 
-m_i2c_write_register([DEV, EP_OUT, EP_IN, 0x15, 0xd0, 0x4a])
-m_i2c_write_register([DEV, EP_OUT, EP_IN, 0x15, 0xd1, 0x66])
-m_i2c_write_register([DEV, EP_OUT, EP_IN, 0x15, 0xd6, 0x03])
-m_i2c_write_register([DEV, EP_OUT, EP_IN, 0x15, 0x02, 0x99])
-m_i2c_write_register([DEV, EP_OUT, EP_IN, 0x15, 0x00, 0x1c])
 
-m_i2c_write_register([DEV, EP_OUT, EP_IN, 0x14, 0xd0, 0x4a])
-m_i2c_write_register([DEV, EP_OUT, EP_IN, 0x14, 0xd1, 0x66])
-m_i2c_write_register([DEV, EP_OUT, EP_IN, 0x14, 0xd6, 0x03])
-m_i2c_write_register([DEV, EP_OUT, EP_IN, 0x14, 0x02, 0x99])
-m_i2c_write_register([DEV, EP_OUT, EP_IN, 0x14, 0x00, 0x1c])
+def get_spd(exposure_time_mu=500, clear_pixel_setting=272,
+            detector_a_slave_address=0x41, detector_b_slave_address=0x42):
 
-m_i2c_write_register([DEV, EP_OUT, EP_IN, 0x14, 0xa4, 0x2c])
-m_i2c_write_register([DEV, EP_OUT, EP_IN, 0x15, 0xa4, 0x2c])
-
-# loop to retrieve frames from detector
-for img in range(3):
-    # get values from sensor for both detectors
-    # Parameter list: usb device / endpoint out / endpoint in / slave address
-    #                 exposure time / clear pixel setting
-    # EXPSORE TIME: in µs - both detectors should be used with same value (e.g. 500µs)
-    valuesA = np.frombuffer(m_read_detector([DEV, EP_OUT, EP_IN, 0x41, 500, 272]), dtype=np.uint16)
-    valuesB = np.frombuffer(m_read_detector([DEV, EP_OUT, EP_IN, 0x42, 500, 272]), dtype=np.uint16)
+    DEV, EP_OUT, EP_IN = dvc_open()
+    values_a = np.frombuffer(m_read_detector(
+        [DEV, EP_OUT, EP_IN, detector_a_slave_address, exposure_time_mu, clear_pixel_setting]), dtype=np.uint16)
+    values_b = np.frombuffer(m_read_detector(
+        [DEV, EP_OUT, EP_IN, detector_b_slave_address, exposure_time_mu, clear_pixel_setting]), dtype=np.uint16)
 
     # concat arrays to plot both detectors in one figure
-    values = np.concatenate((valuesA, valuesB), axis=0)
+    # values = np.concatenate((valuesA, valuesB), axis=0)
 
-    # plot detector values
-    plt.figure(figsize=(15, 5))
-    plt.plot(values)
-    plt.show()
+    # free all usb resources
+    usb.util.dispose_resources(DEV)
 
-    # get detector temperature / one value for each end
-    temp_raw = 256 * m_i2c_read_register([DEV, EP_OUT, EP_IN, 0x15, 0xA3])[8] \
-                   + m_i2c_read_register([DEV, EP_OUT, EP_IN, 0x15, 0xA2])[8]
-    temp_celsius = (temp_raw + 10000.0) / 48.0 - 273.0
-    print("Temperatur Detector A / left: {:.2f}°C".format(temp_celsius))
-    temp_raw = 256 * m_i2c_read_register([DEV, EP_OUT, EP_IN, 0x15, 0xA1])[8] \
-                   + m_i2c_read_register([DEV, EP_OUT, EP_IN, 0x15, 0xA0])[8]
-    temp_celsius = (temp_raw + 10000.0) / 48.0 - 273.0
-    print("Temperatur Detector A / right: {:.2f}°C".format(temp_celsius))
-    temp_raw = 256 * m_i2c_read_register([DEV, EP_OUT, EP_IN, 0x14, 0xA3])[8] \
-                   + m_i2c_read_register([DEV, EP_OUT, EP_IN, 0x14, 0xA2])[8]
-    temp_celsius = (temp_raw + 10000.0) / 48.0 - 273.0
-    print("Temperatur Detector B / left: {:.2f}°C".format(temp_celsius))
-    temp_raw = 256 * m_i2c_read_register([DEV, EP_OUT, EP_IN, 0x14, 0xA1])[8] \
-                   + m_i2c_read_register([DEV, EP_OUT, EP_IN, 0x14, 0xA0])[8]
-    temp_celsius = (temp_raw + 10000.0) / 48.0 - 273.0
-    print("Temperatur Detector B / right: {:.2f}°C".format(temp_celsius))
+    return values_a, values_b
 
-# free all usb resources
-usb.util.dispose_resources(DEV)
+
+
+
+
+
