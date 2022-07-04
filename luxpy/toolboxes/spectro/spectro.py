@@ -65,6 +65,14 @@ def init(manufacturer):
                 return oceanoptics
             except:
                 Warning('Could not load oceanoptics sub-module into spectro. Make python-seabreeze, pyubs, etc. is installed correctly.')
+             
+        elif manufacturer == 'plicore':
+            try:
+                from .plicore import plicore as plicore
+                return plicore
+            except:
+                Warning('Could not load plicore sub-module into spectro. Check if all dependencies are installed correctly.')
+          
         else:
             raise Exception('Unsupported manufacturer!')
 
@@ -75,7 +83,7 @@ def get_spd(manufacturer = 'jeti', dvc = 0, Tint = 0, autoTint_max = None, close
     
     Args:
         :manufacturer:
-            | 'jeti' or 'oceanoptics', optional
+            | 'jeti' , 'oceanoptics', or plicore optional
             | Manufacturer of spectrometer (ensures the correct module is loaded).
         :dvc:
             | 0 or int or spectrometer handle, optional
